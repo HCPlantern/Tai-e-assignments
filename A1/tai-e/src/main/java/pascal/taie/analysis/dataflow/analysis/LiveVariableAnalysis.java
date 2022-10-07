@@ -74,13 +74,10 @@ public class LiveVariableAnalysis extends
         if (lValue.isPresent() && lValue.get() instanceof Var) {
             res.remove((Var) lValue.get());
         }
+        // One stmt can have multiple uses
         rValues.stream().filter(rValue -> rValue instanceof Var).forEach(rValue -> res.add((Var) rValue));
-        if (!res.equals(in)) {
-            in.clear();
-            in.union(res);
-            return true;
-        } else {
-            return false;
-        }
+        // in will not shrink, so just union res into in
+        // if in is changed, return true
+        return in.union(res);
     }
 }

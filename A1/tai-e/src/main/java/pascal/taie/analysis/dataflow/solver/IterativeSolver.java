@@ -49,10 +49,7 @@ class IterativeSolver<Node, Fact> extends Solver<Node, Fact> {
                 Fact inFact = result.getInFact(node);
                 Fact outFact = result.getOutFact(node);
                 // Union all the successors' in-facts as the out-fact of the current node
-                for (Node succ : cfg.getSuccsOf(node)) {
-                    analysis.meetInto(result.getInFact(succ), outFact);
-                }
-                result.setOutFact(node, outFact);
+                cfg.getSuccsOf(node).forEach(succ -> analysis.meetInto(result.getInFact(succ), outFact));
                 // transfer node
                 boolean thisChanged = analysis.transferNode(node, inFact, outFact);
                 changed = changed || thisChanged;
