@@ -71,11 +71,15 @@ public class LiveVariableAnalysis extends
         List<RValue> rValues = stmt.getUses();
         SetFact<Var> res = out.copy();
         // One stmt can only have one def
-        if (lValue.isPresent() && lValue.get() instanceof Var) {
-            res.remove((Var) lValue.get());
+        if (lValue.isPresent() && lValue.get() instanceof Var v) {
+            res.remove(v);
         }
         // One stmt can have multiple uses
-        rValues.stream().filter(rValue -> rValue instanceof Var).forEach(rValue -> res.add((Var) rValue));
+        for (RValue rValue : rValues) {
+            if (rValue instanceof Var v) {
+                res.add(v);
+            }
+        }
         // in will not shrink, so just union res into in
         // if in is changed, return true
         return in.union(res);
