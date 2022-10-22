@@ -99,15 +99,17 @@ public class ConstantPropagation extends
         CPFact res = in.copy();
         // Reference types (e.g. class types and array types) are not supported.
         // Other primitive types are not supported too.
-        // In other cases (e.g. field storage stmt like o.f = x), transfer function do nothing.
-        if (stmt instanceof AssignStmt<?, ?> assignStmt) {
-            LValue lValue = assignStmt.getLValue();
-            RValue rValue = assignStmt.getRValue();
-            if (lValue instanceof Var var) {
-                if (canHoldInt(var)) {
-                    in.remove(var);
-                    res.update(var, evaluate(rValue, in));
-                }
+        // For cases that lvalue is Var but right exp is other type (e.g. function call), treat var as NAC.
+        // In other cases where lvalue is not a Var (e.g. field storage stmt like o.f = x),
+        // transfer function do nothing.
+        Optional<LValue> lValue = stmt.getDef();
+        if (lValue.isPresent() && lValue.get() instanceof Var var && canHoldInt(var)) {
+            in.remove(var);
+            if (stmt instanceof AssignStmt<?, ?> assignStmt) {
+                RValue rValue = assignStmt.getRValue();
+                res.update(var, evaluate(rValue, in));
+            } else {
+                res.update(var, Value.getNAC());
             }
         }
         return out.copyFrom(res);
