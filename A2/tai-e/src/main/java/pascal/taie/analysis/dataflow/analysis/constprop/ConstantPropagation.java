@@ -133,15 +133,11 @@ public class ConstantPropagation extends
      */
     public static boolean canHoldInt(Var var) {
         Type type = var.getType();
-        if (type instanceof PrimitiveType) {
-            switch ((PrimitiveType) type) {
-                case BYTE:
-                case SHORT:
-                case INT:
-                case CHAR:
-                case BOOLEAN:
-                    return true;
-            }
+        if (type instanceof PrimitiveType primitiveType) {
+            return switch (primitiveType) {
+                case BYTE, SHORT, INT, CHAR, BOOLEAN -> true;
+                default -> false;
+            };
         }
         return false;
     }
@@ -197,8 +193,16 @@ public class ConstantPropagation extends
                 }
                 // value1 or value2 is NAC
             } else if (value1.isNAC()) {
-                // NAC / 0 returns UNDEF
-                return (value2.isConstant() && value2.getConstant() == 0) ? Value.getUndef() : Value.getNAC();
+                // NAC / 0 or NAC % 0 returns UNDEF
+                if (value2.isConstant() && value2.getConstant() == 0) {
+                    if (binaryExp instanceof ArithmeticExp arithmeticExp) {
+                        return switch (arithmeticExp.getOperator()) {
+                            case DIV, REM -> Value.getUndef();
+                            default -> Value.getNAC();
+                        };
+                    }
+                }
+                return Value.getNAC();
             } else if (value2.isNAC()) {
                 return Value.getNAC();
             } else {
