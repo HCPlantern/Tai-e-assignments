@@ -80,16 +80,10 @@ public class ConstantPropagation extends
             return Value.getNAC();
         } else if (v1.isUndef() && v2.isUndef()) {
             return Value.getUndef();
-        } else if (v1.isUndef()) {
-            return v2;
-        } else if (v2.isUndef()) {
-            return v1;
+        } else if (v1.isUndef() || v2.isUndef()) {
+            return v1.isUndef() ? v2 : v1;
         } else if (v1.isConstant() && v2.isConstant()) {
-            if (v1.getConstant() == v2.getConstant()) {
-                return v1;
-            } else {
-                return Value.getNAC();
-            }
+            return v1.getConstant() == v2.getConstant() ? v1 : Value.getNAC();
         }
         return Value.getNAC();
     }
