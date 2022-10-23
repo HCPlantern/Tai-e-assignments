@@ -26,7 +26,7 @@ import pascal.taie.analysis.dataflow.analysis.AbstractDataflowAnalysis;
 import pascal.taie.analysis.graph.cfg.CFG;
 import pascal.taie.config.AnalysisConfig;
 import pascal.taie.ir.exp.*;
-import pascal.taie.ir.stmt.AssignStmt;
+import pascal.taie.ir.stmt.DefinitionStmt;
 import pascal.taie.ir.stmt.Stmt;
 import pascal.taie.language.type.PrimitiveType;
 import pascal.taie.language.type.Type;
@@ -94,24 +94,37 @@ public class ConstantPropagation extends
         return Value.getNAC();
     }
 
+    /**
+     * Reference types (e.g. class types and array types) are not supported.
+     * Other primitive types are not supported too.
+     * For cases that lvalue is Var but right exp is other type (e.g. function call), treat var as NAC.
+     * In other cases where lvalue is not a Var (e.g. field storage stmt like o.f = x),
+     * transfer function do nothing.
+     *
+     * @param stmt the statement to be analyzed.
+     * @param in   the input fact.
+     * @param out  the output fact.
+     * @return true if the output fact is changed.
+     */
     @Override
     public boolean transferNode(Stmt stmt, CPFact in, CPFact out) {
         CPFact res = in.copy();
-        // Reference types (e.g. class types and array types) are not supported.
-        // Other primitive types are not supported too.
-        // For cases that lvalue is Var but right exp is other type (e.g. function call), treat var as NAC.
-        // In other cases where lvalue is not a Var (e.g. field storage stmt like o.f = x),
-        // transfer function do nothing.
         Optional<LValue> lValue = stmt.getDef();
+        // 左侧是 Var 且能 hold int
         if (lValue.isPresent() && lValue.get() instanceof Var var && canHoldInt(var)) {
-            in.remove(var);
-            if (stmt instanceof AssignStmt<?, ?> assignStmt) {
-                RValue rValue = assignStmt.getRValue();
-                res.update(var, evaluate(rValue, in));
-            } else {
-                res.update(var, Value.getNAC());
+            res.remove(var); // 这里是对 res 更改，不是 in （一开始写错了）
+            // 对右侧进行检查
+            // 只有常量、变量、二元表达式能够进行下一步的 evaluate
+            if (stmt instanceof DefinitionStmt<?, ?> definitionStmt) {
+                RValue rValue = definitionStmt.getRValue();
+                if (rValue instanceof IntLiteral || rValue instanceof Var || rValue instanceof BinaryExp) {
+                    res.update(var, evaluate(rValue, in)); // 这里是传进去原始的 in
+                    return out.copyFrom(res);
+                }
             }
+            res.update(var, Value.getNAC());
         }
+        // 左侧不是Var, 恒等函数，即不处理
         return out.copyFrom(res);
     }
 
@@ -157,8 +170,8 @@ public class ConstantPropagation extends
                         case ADD -> Value.makeConstant(int1 + int2);
                         case SUB -> Value.makeConstant(int1 - int2);
                         case MUL -> Value.makeConstant(int1 * int2);
-                        case DIV -> int2 == 0 ? Value.getNAC() : Value.makeConstant(int1 / int2);
-                        case REM -> int2 == 0 ? Value.getNAC() : Value.makeConstant(int1 % int2);
+                        case DIV -> int2 == 0 ? Value.getUndef() : Value.makeConstant(int1 / int2);
+                        case REM -> int2 == 0 ? Value.getUndef() : Value.makeConstant(int1 % int2);
                     };
                 } else if (binaryExp instanceof ConditionExp conditionExp) {
                     return switch (conditionExp.getOperator()) {
@@ -183,13 +196,16 @@ public class ConstantPropagation extends
                     };
                 }
                 // value1 or value2 is NAC
-            } else if (value1.isNAC() || value2.isNAC()) {
+            } else if (value1.isNAC()) {
+                // NAC / 0 returns UNDEF
+                return (value2.isConstant() && value2.getConstant() == 0) ? Value.getUndef() : Value.getNAC();
+            } else if (value2.isNAC()) {
                 return Value.getNAC();
-                // else return UNDEF
             } else {
+                // else return UNDEF
                 return Value.getUndef();
             }
         }
-        return Value.getUndef();
+        return Value.getUndef(); // should not reach here
     }
 }
