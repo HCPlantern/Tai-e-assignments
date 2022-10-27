@@ -25,29 +25,16 @@ package pascal.taie.analysis.dataflow.analysis;
 import pascal.taie.analysis.MethodAnalysis;
 import pascal.taie.analysis.dataflow.analysis.constprop.CPFact;
 import pascal.taie.analysis.dataflow.analysis.constprop.ConstantPropagation;
-import pascal.taie.analysis.dataflow.analysis.constprop.Value;
 import pascal.taie.analysis.dataflow.fact.DataflowResult;
 import pascal.taie.analysis.dataflow.fact.SetFact;
 import pascal.taie.analysis.graph.cfg.CFG;
 import pascal.taie.analysis.graph.cfg.CFGBuilder;
-import pascal.taie.analysis.graph.cfg.Edge;
 import pascal.taie.config.AnalysisConfig;
 import pascal.taie.ir.IR;
-import pascal.taie.ir.exp.ArithmeticExp;
-import pascal.taie.ir.exp.ArrayAccess;
-import pascal.taie.ir.exp.CastExp;
-import pascal.taie.ir.exp.FieldAccess;
-import pascal.taie.ir.exp.NewExp;
-import pascal.taie.ir.exp.RValue;
-import pascal.taie.ir.exp.Var;
-import pascal.taie.ir.stmt.AssignStmt;
-import pascal.taie.ir.stmt.If;
+import pascal.taie.ir.exp.*;
 import pascal.taie.ir.stmt.Stmt;
-import pascal.taie.ir.stmt.SwitchStmt;
 
-import java.util.Comparator;
-import java.util.Set;
-import java.util.TreeSet;
+import java.util.*;
 
 public class DeadCodeDetection extends MethodAnalysis {
 
@@ -69,8 +56,25 @@ public class DeadCodeDetection extends MethodAnalysis {
                 ir.getResult(LiveVariableAnalysis.ID);
         // keep statements (dead code) sorted in the resulting set
         Set<Stmt> deadCode = new TreeSet<>(Comparator.comparing(Stmt::getIndex));
-        // TODO - finish me
+
         // Your task is to recognize dead code in ir and add it to deadCode
+        // dead variable
+        ir.getStmts().forEach(stmt -> {
+            SetFact<Var> liveVarsFact = liveVars.getResult(stmt);
+            Optional<LValue> lValue = stmt.getDef();
+            if (lValue.isPresent() && lValue.get() instanceof Var var) {
+                for (RValue rValue : stmt.getUses()) {
+                    // if rvalue has side effect, skip current stmt
+                    if (!hasNoSideEffect(rValue)) {
+                        return;
+                    }
+                }
+                if (!liveVarsFact.contains(var)) {
+                    deadCode.add(stmt);
+                }
+            }
+        });
+
         return deadCode;
     }
 
