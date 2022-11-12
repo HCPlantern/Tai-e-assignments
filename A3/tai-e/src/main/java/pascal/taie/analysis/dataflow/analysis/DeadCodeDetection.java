@@ -84,7 +84,7 @@ public class DeadCodeDetection extends MethodAnalysis {
             visited.add(stmt);
             cfg.getOutEdgesOf(stmt)
                     .stream()
-                    .filter(edge -> !isUnreachableBranch(edge, constants))
+                    .filter(edge -> isReachableBranch(edge, constants))
                     .map(Edge::getTarget)
                     .forEach(target -> {
                         if (!visited.contains(target)) {
@@ -101,31 +101,31 @@ public class DeadCodeDetection extends MethodAnalysis {
         return deadCode;
     }
 
-    private boolean isUnreachableBranch(Edge<Stmt> edge, DataflowResult<Stmt, CPFact> constants) {
+    private boolean isReachableBranch(Edge<Stmt> edge, DataflowResult<Stmt, CPFact> constants) {
         Stmt source = edge.getSource();
         if (source instanceof If ifStmt) {
             Value value = ConstantPropagation.evaluate(ifStmt.getCondition(), constants.getResult(ifStmt));
             if (value.isConstant()) {
                 return switch (edge.getKind()) {
-                    case IF_TRUE -> value.getConstant() != 1;
-                    case IF_FALSE -> value.getConstant() != 0;
-                    default -> false;
+                    case IF_TRUE -> value.getConstant() == 1;
+                    case IF_FALSE -> value.getConstant() == 0;
+                    default -> true;
                 };
             }
         } else if (source instanceof SwitchStmt switchStmt) {
             Value value = ConstantPropagation.evaluate(switchStmt.getVar(), constants.getResult(switchStmt));
             if (value.isConstant()) {
                 return switch (edge.getKind()) {
-                    case SWITCH_CASE -> edge.getCaseValue() != value.getConstant();
+                    case SWITCH_CASE -> edge.getCaseValue() == value.getConstant();
                     // if any other case is reachable, then the default case is unreachable
                     case SWITCH_DEFAULT -> switchStmt.getCaseValues()
                             .stream()
-                            .anyMatch(caseValue -> caseValue == value.getConstant());
-                    default -> false;
+                            .noneMatch(caseValue -> caseValue == value.getConstant());
+                    default -> true;
                 };
             }
         }
-        return false;
+        return true;
 }
 
     /**
