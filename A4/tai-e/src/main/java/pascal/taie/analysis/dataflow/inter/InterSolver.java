@@ -24,11 +24,11 @@ package pascal.taie.analysis.dataflow.inter;
 
 import pascal.taie.analysis.dataflow.fact.DataflowResult;
 import pascal.taie.analysis.graph.icfg.ICFG;
-import pascal.taie.util.collection.SetQueue;
 
+import java.util.HashSet;
+import java.util.LinkedList;
 import java.util.Queue;
 import java.util.Set;
-import java.util.stream.Collectors;
 
 /**
  * Solver for inter-procedural data-flow analysis.
@@ -59,10 +59,34 @@ class InterSolver<Method, Node, Fact> {
     }
 
     private void initialize() {
-        // TODO - finish me
+        Set<Node> entryNodes = new HashSet<>();
+        icfg.entryMethods().map(icfg::getEntryOf).forEach(node -> {
+            entryNodes.add(node);
+            result.setInFact(node, analysis.newBoundaryFact(node));
+            result.setOutFact(node, analysis.newBoundaryFact(node));
+        });
+        icfg.getNodes().forEach(node -> {
+            if (!entryNodes.contains(node)) {
+                result.setInFact(node, analysis.newInitialFact());
+                result.setOutFact(node, analysis.newInitialFact());
+            }
+        });
     }
 
     private void doSolve() {
-        // TODO - finish me
+        Queue<Node> workList = new LinkedList<>(icfg.getNodes());
+        while (!workList.isEmpty()) {
+            Node node = workList.poll();
+            Fact in = result.getInFact(node);
+            Fact out = result.getOutFact(node);
+            icfg.getInEdgesOf(node).forEach(inEdge -> {
+                Fact outFact = result.getOutFact(inEdge.getSource());
+                Fact transferredFact = analysis.transferEdge(inEdge, outFact);
+                analysis.meetInto(transferredFact, in);
+            });
+            if (analysis.transferNode(node, in, out)) {
+                icfg.getSuccsOf(node).forEach(workList::offer);
+            }
+        }
     }
 }
