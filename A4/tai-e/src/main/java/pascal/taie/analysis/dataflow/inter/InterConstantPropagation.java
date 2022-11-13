@@ -24,7 +24,7 @@ package pascal.taie.analysis.dataflow.inter;
 
 import pascal.taie.analysis.dataflow.analysis.constprop.CPFact;
 import pascal.taie.analysis.dataflow.analysis.constprop.ConstantPropagation;
-import pascal.taie.analysis.graph.cfg.CFG;
+import pascal.taie.analysis.dataflow.analysis.constprop.Value;
 import pascal.taie.analysis.graph.cfg.CFGBuilder;
 import pascal.taie.analysis.graph.icfg.CallEdge;
 import pascal.taie.analysis.graph.icfg.CallToReturnEdge;
@@ -34,9 +34,15 @@ import pascal.taie.config.AnalysisConfig;
 import pascal.taie.ir.IR;
 import pascal.taie.ir.exp.InvokeExp;
 import pascal.taie.ir.exp.Var;
+import pascal.taie.ir.stmt.DefinitionStmt;
 import pascal.taie.ir.stmt.Invoke;
 import pascal.taie.ir.stmt.Stmt;
 import pascal.taie.language.classes.JMethod;
+import pascal.taie.language.type.PrimitiveType;
+import pascal.taie.language.type.Type;
+
+import java.util.Collection;
+import java.util.List;
 
 /**
  * Implementation of interprocedural constant propagation for int values.
@@ -76,37 +82,81 @@ public class InterConstantPropagation extends
 
     @Override
     protected boolean transferCallNode(Stmt stmt, CPFact in, CPFact out) {
-        // TODO - finish me
-        return false;
+        return out.copyFrom(in);
     }
 
     @Override
     protected boolean transferNonCallNode(Stmt stmt, CPFact in, CPFact out) {
-        // TODO - finish me
-        return false;
+        return cp.transferNode(stmt, in, out);
     }
 
     @Override
     protected CPFact transferNormalEdge(NormalEdge<Stmt> edge, CPFact out) {
-        // TODO - finish me
-        return null;
+        return out.copy();
     }
 
     @Override
     protected CPFact transferCallToReturnEdge(CallToReturnEdge<Stmt> edge, CPFact out) {
-        // TODO - finish me
-        return null;
+        CPFact res = out.copy();
+        Stmt source = edge.getSource();
+        if (source instanceof DefinitionStmt<?, ?> definitionStmt) {
+            // if this definition statement has a left-side var, then getDef() is not null
+            if (definitionStmt.getDef().isPresent() && definitionStmt.getDef().get() instanceof Var var) {
+                res.remove(var);
+            }
+        }
+        return res;
     }
 
     @Override
     protected CPFact transferCallEdge(CallEdge<Stmt> edge, CPFact callSiteOut) {
-        // TODO - finish me
-        return null;
+        CPFact res = callSiteOut.copy();
+        if (edge.getSource() instanceof Invoke invoke) {
+            InvokeExp invokeExp = invoke.getInvokeExp();
+            assert invokeExp.getMethodRef().getSubsignature().equals(edge.getCallee().getSubsignature());
+            List<Var> args = invokeExp.getArgs();
+            List<Var> params = edge.getCallee().getIR().getParams();
+            for (int i = 0; i < args.size(); i++) {
+                Var arg = args.get(i);
+                Var param = params.get(i);
+                if (canHoldInt(param)) {
+                    res.update(param, callSiteOut.get(arg));
+                }
+            }
+        }
+        return res;
     }
 
     @Override
     protected CPFact transferReturnEdge(ReturnEdge<Stmt> edge, CPFact returnOut) {
-        // TODO - finish me
-        return null;
+        CPFact res = newInitialFact();
+        if (edge.getCallSite() instanceof Invoke invoke) {
+            Var var = invoke.getResult();
+            assert (var != null && canHoldInt(var));
+            // meet all the return values
+            Collection<Var> returnVars = edge.getReturnVars();
+            Value resValue = Value.getUndef();
+            for (Var returnVar : returnVars) {
+                Value value = returnOut.get(returnVar);
+                cp.meetValue(resValue, value);
+            }
+            res.update(var, resValue);
+        }
+        return res;
+    }
+
+    /**
+     * @return true if the given variable can hold integer value, otherwise false.
+     */
+    public static boolean canHoldInt(Var var) {
+        Type type = var.getType();
+        if (type instanceof PrimitiveType primitiveType) {
+            return switch (primitiveType) {
+                case BYTE, SHORT, INT, CHAR, BOOLEAN -> true;
+                default -> false;
+            };
+        }
+        return false;
+
     }
 }
