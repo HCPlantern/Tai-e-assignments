@@ -27,6 +27,7 @@ import org.apache.logging.log4j.Logger;
 import pascal.taie.World;
 import pascal.taie.analysis.graph.callgraph.CallGraphs;
 import pascal.taie.analysis.graph.callgraph.DefaultCallGraph;
+import pascal.taie.analysis.graph.callgraph.Edge;
 import pascal.taie.analysis.pta.core.heap.HeapModel;
 import pascal.taie.analysis.pta.core.heap.Obj;
 import pascal.taie.ir.exp.Var;
@@ -34,6 +35,8 @@ import pascal.taie.ir.stmt.*;
 import pascal.taie.language.classes.ClassHierarchy;
 import pascal.taie.language.classes.JMethod;
 import pascal.taie.language.type.Type;
+
+import javax.annotation.Nullable;
 
 class Solver {
 
@@ -149,7 +152,9 @@ class Solver {
         // static invoke: T.m(x1, ..., xn);
         @Override
         public Void visit(Invoke stmt) {
-            // TODO
+            assert stmt.isStatic();
+            var method = resolveCallee(null, stmt);
+            processCallHelper(stmt, method);
             return null;
         }
 
@@ -160,6 +165,33 @@ class Solver {
      */
     private void addPFGEdge(Pointer source, Pointer target) {
         pointerFlowGraph.addEdge(source, target);
+    }
+
+    /**
+     * Add call graph edge, add parameter edge and return edge
+     *
+     * @param invoke the call site
+     * @param method the resolved method
+     */
+    private void processCallHelper(Invoke invoke, JMethod method) {
+        if (callGraph.addEdge(new Edge<>(CallGraphs.getCallKind(invoke), invoke, method))) {
+            addReachable(method);
+            // pass arguments
+            for (int i = 0; i < method.getParamCount(); i++) {
+                var param = method.getIR().getParam(i);
+                var arg = invoke.getInvokeExp().getArg(i);
+                addPFGEdge(pointerFlowGraph.getVarPtr(arg), pointerFlowGraph.getVarPtr(param));
+            }
+            // pass return values
+            Var r = invoke.getLValue();
+            if (r != null) {
+                var rPtr = pointerFlowGraph.getVarPtr(r);
+                method.getIR().getReturnVars().forEach(retVar -> {
+                    var retPtr = pointerFlowGraph.getVarPtr(retVar);
+                    addPFGEdge(retPtr, rPtr);
+                });
+            }
+        }
     }
 
     /**
@@ -232,7 +264,13 @@ class Solver {
      * @param recv a new discovered object pointed by the variable.
      */
     private void processCall(Var var, Obj recv) {
-        // TODO - finish me
+        var invokes = var.getInvokes();
+        invokes.forEach(invoke -> {
+            var method = resolveCallee(recv, invoke);
+            var thisVar = method.getIR().getThis();
+            workList.addEntry(pointerFlowGraph.getVarPtr(thisVar), new PointsToSet(recv));
+            processCallHelper(invoke, method);
+        });
     }
 
     /**
@@ -243,7 +281,7 @@ class Solver {
      * @param callSite the call site to be resolved.
      * @return the resolved callee.
      */
-    private JMethod resolveCallee(Obj recv, Invoke callSite) {
+    private JMethod resolveCallee(@Nullable Obj recv, Invoke callSite) {
         Type type = recv != null ? recv.getType() : null;
         return CallGraphs.resolveCallee(type, callSite);
     }
