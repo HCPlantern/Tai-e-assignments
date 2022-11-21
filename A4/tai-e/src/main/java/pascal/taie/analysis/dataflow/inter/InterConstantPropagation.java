@@ -32,6 +32,7 @@ import pascal.taie.analysis.graph.icfg.NormalEdge;
 import pascal.taie.analysis.graph.icfg.ReturnEdge;
 import pascal.taie.config.AnalysisConfig;
 import pascal.taie.ir.IR;
+import pascal.taie.ir.exp.InvokeDynamic;
 import pascal.taie.ir.exp.InvokeExp;
 import pascal.taie.ir.exp.Var;
 import pascal.taie.ir.stmt.DefinitionStmt;
@@ -43,7 +44,6 @@ import pascal.taie.language.type.Type;
 
 import java.util.Collection;
 import java.util.List;
-
 /**
  * Implementation of interprocedural constant propagation for int values.
  */
@@ -110,17 +110,19 @@ public class InterConstantPropagation extends
 
     @Override
     protected CPFact transferCallEdge(CallEdge<Stmt> edge, CPFact callSiteOut) {
-        CPFact res = callSiteOut.copy();
+        // Passing arguments at call site to parameters of the callee
+        CPFact res = newInitialFact();
         if (edge.getSource() instanceof Invoke invoke) {
             InvokeExp invokeExp = invoke.getInvokeExp();
-            assert invokeExp.getMethodRef().getSubsignature().equals(edge.getCallee().getSubsignature());
-            List<Var> args = invokeExp.getArgs();
-            List<Var> params = edge.getCallee().getIR().getParams();
-            for (int i = 0; i < args.size(); i++) {
-                Var arg = args.get(i);
-                Var param = params.get(i);
-                if (canHoldInt(param)) {
-                    res.update(param, callSiteOut.get(arg));
+            if (!(invokeExp instanceof InvokeDynamic) && invokeExp.getMethodRef().getSubsignature().equals(edge.getCallee().getSubsignature())) {
+                List<Var> args = invokeExp.getArgs();
+                List<Var> params = edge.getCallee().getIR().getParams();
+                for (int i = 0; i < args.size(); i++) {
+                    Var arg = args.get(i);
+                    Var param = params.get(i);
+                    if (canHoldInt(param)) {
+                        res.update(param, callSiteOut.get(arg));
+                    }
                 }
             }
         }
@@ -132,15 +134,13 @@ public class InterConstantPropagation extends
         CPFact res = newInitialFact();
         if (edge.getCallSite() instanceof Invoke invoke) {
             Var var = invoke.getResult();
-            assert (var != null && canHoldInt(var));
-            // meet all the return values
-            Collection<Var> returnVars = edge.getReturnVars();
-            Value resValue = Value.getUndef();
-            for (Var returnVar : returnVars) {
-                Value value = returnOut.get(returnVar);
-                cp.meetValue(resValue, value);
+            if (var != null && canHoldInt(var)) {
+                Value returnValue = edge.getReturnVars()
+                        .stream()
+                        .map(returnOut::get)
+                        .reduce(Value.getUndef(), cp::meetValue);
+                res.update(var, returnValue);
             }
-            res.update(var, resValue);
         }
         return res;
     }
