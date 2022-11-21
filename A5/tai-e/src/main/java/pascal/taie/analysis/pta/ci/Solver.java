@@ -89,12 +89,11 @@ class Solver {
             // Static invoke
             method.getIR().getStmts()
                     .stream()
-                    .filter(stmt ->
-                            (stmt instanceof New) ||
-                                    (stmt instanceof Copy) ||
-                                    (stmt instanceof StoreField storeField && storeField.isStatic()) ||
-                                    (stmt instanceof LoadField loadField && loadField.isStatic()) ||
-                                    (stmt instanceof Invoke invoke && invoke.isStatic()))
+                    .filter(stmt -> (stmt instanceof New) ||
+                            (stmt instanceof Copy) ||
+                            (stmt instanceof StoreField storeField && storeField.isStatic()) ||
+                            (stmt instanceof LoadField loadField && loadField.isStatic()) ||
+                            (stmt instanceof Invoke invoke && invoke.isStatic()))
                     .forEach(stmt -> stmt.accept(stmtProcessor));
         }
     }
