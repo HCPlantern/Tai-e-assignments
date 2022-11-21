@@ -26,28 +26,14 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import pascal.taie.World;
 import pascal.taie.analysis.graph.callgraph.CallGraphs;
-import pascal.taie.analysis.graph.callgraph.CallKind;
 import pascal.taie.analysis.graph.callgraph.DefaultCallGraph;
-import pascal.taie.analysis.graph.callgraph.Edge;
 import pascal.taie.analysis.pta.core.heap.HeapModel;
 import pascal.taie.analysis.pta.core.heap.Obj;
-import pascal.taie.ir.exp.InvokeExp;
 import pascal.taie.ir.exp.Var;
-import pascal.taie.ir.proginfo.MethodRef;
-import pascal.taie.ir.stmt.Copy;
-import pascal.taie.ir.stmt.Invoke;
-import pascal.taie.ir.stmt.LoadArray;
-import pascal.taie.ir.stmt.LoadField;
-import pascal.taie.ir.stmt.New;
-import pascal.taie.ir.stmt.StmtVisitor;
-import pascal.taie.ir.stmt.StoreArray;
-import pascal.taie.ir.stmt.StoreField;
+import pascal.taie.ir.stmt.*;
 import pascal.taie.language.classes.ClassHierarchy;
 import pascal.taie.language.classes.JMethod;
-import pascal.taie.util.AnalysisException;
 import pascal.taie.language.type.Type;
-
-import java.util.List;
 
 class Solver {
 
@@ -96,29 +82,137 @@ class Solver {
      * Processes new reachable method.
      */
     private void addReachable(JMethod method) {
-        // TODO - finish me
+        if (callGraph.addReachableMethod(method)) { // if RM changes, continue
+            // new Stmt
+            // assign Stmt
+            // Static field Load and Store
+            // Static invoke
+            method.getIR().getStmts()
+                    .stream()
+                    .filter(stmt ->
+                            (stmt instanceof New) ||
+                                    (stmt instanceof Copy) ||
+                                    (stmt instanceof StoreField storeField && storeField.isStatic()) ||
+                                    (stmt instanceof LoadField loadField && loadField.isStatic()) ||
+                                    (stmt instanceof Invoke invoke && invoke.isStatic()))
+                    .forEach(stmt -> stmt.accept(stmtProcessor));
+        }
     }
 
     /**
      * Processes statements in new reachable methods.
      */
     private class StmtProcessor implements StmtVisitor<Void> {
-        // TODO - if you choose to implement addReachable()
-        //  via visitor pattern, then finish me
+
+        // new stmt: x = new T();
+        @Override
+        public Void visit(New stmt) {
+            var obj = heapModel.getObj(stmt);
+            var pointer = pointerFlowGraph.getVarPtr(stmt.getLValue());
+            workList.addEntry(pointer, new PointsToSet(obj));
+            return null;
+        }
+
+        // assign stmt: x = y;
+        @Override
+        public Void visit(Copy stmt) {
+            var y = pointerFlowGraph.getVarPtr(stmt.getRValue());
+            var x = pointerFlowGraph.getVarPtr(stmt.getLValue());
+            addPFGEdge(y, x);
+            return null;
+        }
+
+        // static field store: T.f = y;
+        @Override
+        public Void visit(StoreField stmt) {
+            // none static field store will be processed in analyze()
+            if (stmt.isStatic()) {
+                var staticFieldPtr = pointerFlowGraph.getStaticField(stmt.getFieldRef().resolve());
+                var y = pointerFlowGraph.getVarPtr(stmt.getRValue());
+                addPFGEdge(y, staticFieldPtr);
+            }
+            return null;
+        }
+
+        // static field load: y = T.f;
+        @Override
+        public Void visit(LoadField stmt) {
+            // none static field load will be processed in analyze()
+            if (stmt.isStatic()) {
+                var staticFieldPtr = pointerFlowGraph.getStaticField(stmt.getFieldRef().resolve());
+                var y = pointerFlowGraph.getVarPtr(stmt.getLValue());
+                addPFGEdge(staticFieldPtr, y);
+            }
+            return null;
+        }
+
+        // invoke: x.k(a1, ..., an);
+        // static invoke: T.m(x1, ..., xn);
+        @Override
+        public Void visit(Invoke stmt) {
+            // TODO
+            return null;
+        }
+
     }
 
     /**
      * Adds an edge "source -> target" to the PFG.
      */
     private void addPFGEdge(Pointer source, Pointer target) {
-        // TODO - finish me
+        pointerFlowGraph.addEdge(source, target);
     }
 
     /**
      * Processes work-list entries until the work-list is empty.
      */
     private void analyze() {
-        // TODO - finish me
+        while (!workList.isEmpty()) {
+            var entry = workList.pollEntry();
+            var n = entry.pointer();
+            var ptn = n.getPointsToSet();
+            var pts = entry.pointsToSet();
+            // cal delta
+            var delta = new PointsToSet();
+            pts.objects()
+                    .filter(pointer -> ptn.objects().noneMatch(pointer::equals))
+                    .forEach(delta::addObject);
+            propagate(n, delta);
+
+            if (n instanceof VarPtr varPtr) {
+                Var var = varPtr.getVar();
+                delta.objects().forEach(obj -> {
+                    // store field
+                    var.getStoreFields().forEach(storeStmt -> {
+                        var y = pointerFlowGraph.getVarPtr(storeStmt.getRValue());
+                        var field = storeStmt.getFieldRef().resolve();
+                        var instanceField = pointerFlowGraph.getInstanceField(obj, field);
+                        addPFGEdge(y, instanceField);
+                    });
+                    // load field
+                    var.getLoadFields().forEach(loadStmt -> {
+                        var y = pointerFlowGraph.getVarPtr(loadStmt.getLValue());
+                        var field = loadStmt.getFieldRef().resolve();
+                        var instanceField = pointerFlowGraph.getInstanceField(obj, field);
+                        addPFGEdge(instanceField, y);
+                    });
+                    // array store
+                    var.getStoreArrays().forEach(arrayStoreStmt -> {
+                        var y = pointerFlowGraph.getVarPtr(arrayStoreStmt.getRValue());
+                        var arrayIndex = pointerFlowGraph.getArrayIndex(obj);
+                        addPFGEdge(y, arrayIndex);
+                    });
+                    // array load
+                    var.getLoadArrays().forEach(arrayLoadStmt -> {
+                        var y = pointerFlowGraph.getVarPtr(arrayLoadStmt.getLValue());
+                        var arrayIndex = pointerFlowGraph.getArrayIndex(obj);
+                        addPFGEdge(arrayIndex, y);
+                    });
+                    // process call
+                    processCall(var, obj);
+                });
+            }
+        }
     }
 
     /**
@@ -126,8 +220,10 @@ class Solver {
      * returns the difference set of pointsToSet and pt(pointer).
      */
     private PointsToSet propagate(Pointer pointer, PointsToSet pointsToSet) {
-        // TODO - finish me
-        return null;
+        var ptn = pointer.getPointsToSet();
+        pointsToSet.forEach(ptn::addObject);
+        pointerFlowGraph.getSuccsOf(pointer).forEach(s -> workList.addEntry(s, pointsToSet));
+        return pointsToSet;
     }
 
     /**
