@@ -256,9 +256,11 @@ class Solver {
      * returns the difference set of pointsToSet and pt(pointer).
      */
     private PointsToSet propagate(Pointer pointer, PointsToSet pointsToSet) {
-        var ptn = pointer.getPointsToSet();
-        pointsToSet.forEach(ptn::addObject);
-        pointerFlowGraph.getSuccsOf(pointer).forEach(s -> workList.addEntry(s, pointsToSet));
+        if (!pointsToSet.isEmpty()) {
+            var ptn = pointer.getPointsToSet();
+            pointsToSet.forEach(ptn::addObject);
+            pointerFlowGraph.getSuccsOf(pointer).forEach(s -> workList.addEntry(s, pointsToSet));
+        }
         return pointsToSet;
     }
 
