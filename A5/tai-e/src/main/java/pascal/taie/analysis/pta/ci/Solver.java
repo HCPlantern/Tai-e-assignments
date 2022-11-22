@@ -164,7 +164,12 @@ class Solver {
      * Adds an edge "source -> target" to the PFG.
      */
     private void addPFGEdge(Pointer source, Pointer target) {
-        pointerFlowGraph.addEdge(source, target);
+        if (pointerFlowGraph.addEdge(source, target)) {
+            var pts = source.getPointsToSet();
+            if (!pts.isEmpty()) {
+                workList.addEntry(target, pts);
+            }
+        }
     }
 
     /**
