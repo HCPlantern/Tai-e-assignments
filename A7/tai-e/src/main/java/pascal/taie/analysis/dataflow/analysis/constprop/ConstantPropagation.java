@@ -102,10 +102,8 @@ public class ConstantPropagation extends
             // 对右侧进行检查
             if (stmt instanceof DefinitionStmt<?, ?> definitionStmt) {
                 RValue rValue = definitionStmt.getRValue();
-                if (rValue instanceof IntLiteral || rValue instanceof Var || rValue instanceof BinaryExp) {
                     res.update(var, evaluate(rValue, in)); // 这里是传进去原始的 in
                     return out.copyFrom(res);
-                }
             }
             res.update(var, Value.getNAC());
         }
