@@ -32,20 +32,19 @@ import pascal.taie.analysis.graph.icfg.CallToReturnEdge;
 import pascal.taie.analysis.graph.icfg.NormalEdge;
 import pascal.taie.analysis.graph.icfg.ReturnEdge;
 import pascal.taie.analysis.pta.PointerAnalysisResult;
+import pascal.taie.analysis.pta.core.heap.Obj;
 import pascal.taie.config.AnalysisConfig;
 import pascal.taie.ir.IR;
-import pascal.taie.ir.exp.InvokeDynamic;
-import pascal.taie.ir.exp.InvokeExp;
-import pascal.taie.ir.exp.Var;
-import pascal.taie.ir.stmt.DefinitionStmt;
-import pascal.taie.ir.stmt.Invoke;
-import pascal.taie.ir.stmt.Stmt;
+import pascal.taie.ir.exp.*;
+import pascal.taie.ir.proginfo.FieldRef;
+import pascal.taie.ir.stmt.*;
+import pascal.taie.language.classes.JClass;
 import pascal.taie.language.classes.JMethod;
 import pascal.taie.language.type.PrimitiveType;
 import pascal.taie.language.type.Type;
+import pascal.taie.util.collection.Pair;
 
-import java.util.List;
-
+import java.util.*;
 /**
  * Implementation of interprocedural constant propagation for int values.
  */
@@ -53,8 +52,11 @@ public class InterConstantPropagation extends
         AbstractInterDataflowAnalysis<JMethod, Stmt, CPFact> {
 
     public static final String ID = "inter-constprop";
-
+    public static final Map<Obj, Set<Var>> aliasMap = new HashMap<>();
+    public static final Map<Pair<?, ?>, Value> valMap = new HashMap<>();
+    public static final Map<Pair<JClass, FieldRef>, Set<LoadField>> staticLoadFields = new HashMap<>();
     private final ConstantPropagation cp;
+    public static PointerAnalysisResult pta;
 
     public InterConstantPropagation(AnalysisConfig config) {
         super(config);
@@ -64,8 +66,25 @@ public class InterConstantPropagation extends
     @Override
     protected void initialize() {
         String ptaId = getOptions().getString("pta");
-        PointerAnalysisResult pta = World.get().getResult(ptaId);
+        pta = World.get().getResult(ptaId);
         // You can do initialization work here
+
+        pta.getVars().forEach(var -> {
+            pta.getPointsToSet(var).forEach(obj -> {
+                Set<Var> s = aliasMap.getOrDefault(obj, new HashSet<>());
+                s.add(var);
+                aliasMap.put(obj, s);
+            });
+        });
+
+        icfg.getNodes().forEach(stmt -> {
+            if(stmt instanceof LoadField loadField && loadField.getFieldAccess() instanceof StaticFieldAccess access){
+                var accessPair = new Pair<>(access.getFieldRef().getDeclaringClass(), access.getFieldRef());
+                var set = staticLoadFields.getOrDefault(accessPair, new HashSet<>());
+                set.add(loadField);
+                staticLoadFields.put(accessPair, set);
+            }
+        });
     }
 
     @Override
@@ -147,7 +166,7 @@ public class InterConstantPropagation extends
                 Value returnValue = edge.getReturnVars()
                         .stream()
                         .map(returnOut::get)
-                        .reduce(Value.getUndef(), cp::meetValue);
+                        .reduce(Value.getUndef(), ConstantPropagation::meetValue);
                 res.update(var, returnValue);
             }
         }

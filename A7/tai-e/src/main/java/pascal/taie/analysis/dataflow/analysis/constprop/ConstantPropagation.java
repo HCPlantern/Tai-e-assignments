@@ -24,16 +24,19 @@ package pascal.taie.analysis.dataflow.analysis.constprop;
 
 import pascal.taie.analysis.dataflow.analysis.AbstractDataflowAnalysis;
 import pascal.taie.analysis.graph.cfg.CFG;
+import pascal.taie.analysis.pta.core.heap.Obj;
 import pascal.taie.config.AnalysisConfig;
-import pascal.taie.ir.IR;
 import pascal.taie.ir.exp.*;
 import pascal.taie.ir.stmt.DefinitionStmt;
 import pascal.taie.ir.stmt.Stmt;
 import pascal.taie.language.type.PrimitiveType;
 import pascal.taie.language.type.Type;
-import pascal.taie.util.AnalysisException;
+import pascal.taie.util.collection.Pair;
 
 import java.util.Optional;
+
+import static pascal.taie.analysis.dataflow.inter.InterConstantPropagation.pta;
+import static pascal.taie.analysis.dataflow.inter.InterConstantPropagation.valMap;
 
 public class ConstantPropagation extends
         AbstractDataflowAnalysis<Stmt, CPFact> {
@@ -76,7 +79,7 @@ public class ConstantPropagation extends
     /**
      * Meets two Values.
      */
-    public Value meetValue(Value v1, Value v2) {
+    public static Value meetValue(Value v1, Value v2) {
         if (v1.isNAC() || v2.isNAC()) {
             return Value.getNAC();
         } else if (v1.isUndef() && v2.isUndef()) {
@@ -97,7 +100,6 @@ public class ConstantPropagation extends
         if (lValue.isPresent() && lValue.get() instanceof Var var && canHoldInt(var)) {
             res.remove(var); // 这里是对 res 更改，不是 in （一开始写错了）
             // 对右侧进行检查
-            // 只有常量、变量、二元表达式能够进行下一步的 evaluate
             if (stmt instanceof DefinitionStmt<?, ?> definitionStmt) {
                 RValue rValue = definitionStmt.getRValue();
                 if (rValue instanceof IntLiteral || rValue instanceof Var || rValue instanceof BinaryExp) {
@@ -194,7 +196,38 @@ public class ConstantPropagation extends
                 // else return UNDEF
                 return Value.getUndef();
             }
+        } else if (exp instanceof InstanceFieldAccess access) {
+            var val = Value.getUndef();
+            for (Obj obj : pta.getPointsToSet(access.getBase())) {
+                val = meetValue(val, valMap.getOrDefault(new Pair<>(obj, access.getFieldRef()), Value.getUndef()));
+            }
+            return val;
+        } else if (exp instanceof StaticFieldAccess access) {
+            return valMap.getOrDefault(
+                    new Pair<>(access.getFieldRef().getDeclaringClass(), access.getFieldRef()),
+                    Value.getUndef()
+            );
+        } else if (exp instanceof ArrayAccess access) {
+            var index = evaluate(access.getIndex(), in);
+            var val = Value.getUndef();
+            if (index.isConstant()) {
+                for (Obj obj : pta.getPointsToSet(access.getBase())) {
+                    val = meetValue(val, valMap.getOrDefault(new Pair<>(obj, index), Value.getUndef()));
+                    val = meetValue(val, valMap.getOrDefault(new Pair<>(obj, Value.getNAC()), Value.getUndef()));
+                }
+            } else if (index.isNAC()) {
+                for (Obj obj : pta.getPointsToSet(access.getBase())) {
+                    for (var entry : valMap.entrySet()) {
+                        var accessPair = entry.getKey();
+                        if (accessPair.first().equals(obj) && accessPair.second() instanceof Value) {
+                            val = meetValue(val, entry.getValue());
+                        }
+                    }
+                }
+            }
+            return val;
         }
-        return Value.getUndef(); // should not reach here
+
+        return Value.getNAC(); // should not reach here
     }
 }
