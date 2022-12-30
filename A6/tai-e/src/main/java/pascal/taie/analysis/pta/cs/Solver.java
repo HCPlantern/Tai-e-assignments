@@ -26,6 +26,7 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 import pascal.taie.World;
 import pascal.taie.analysis.graph.callgraph.CallGraphs;
+import pascal.taie.analysis.graph.callgraph.CallKind;
 import pascal.taie.analysis.graph.callgraph.Edge;
 import pascal.taie.analysis.pta.PointerAnalysisResult;
 import pascal.taie.analysis.pta.PointerAnalysisResultImpl;
@@ -41,6 +42,8 @@ import pascal.taie.ir.exp.Var;
 import pascal.taie.ir.stmt.*;
 import pascal.taie.language.classes.JMethod;
 import pascal.taie.language.type.Type;
+
+import java.util.List;
 
 class Solver {
 
@@ -170,10 +173,8 @@ class Solver {
             assert stmt.isStatic();
             var method = resolveCallee(null, stmt);
             var csMethod = csManager.getCSMethod(context, method);
-            var c = context;
-            var csCallSite = csManager.getCSCallSite(c, stmt);
-            var ct = contextSelector.selectContext(csCallSite, method);
-            processCallHelper(c, ct, csCallSite, csMethod);
+            var csCallSite = csManager.getCSCallSite(context, stmt);
+            processCallHelper(csCallSite, csMethod);
             return null;
         }
     }
@@ -197,15 +198,8 @@ class Solver {
         while (!workList.isEmpty()) {
             var entry = workList.pollEntry();
             var n = entry.pointer();
-            var ptn = n.getPointsToSet();
             var pts = entry.pointsToSet();
-            // cal delta
-            var delta = PointsToSetFactory.make();
-            pts.objects()
-                    .filter(pointer -> ptn.objects().noneMatch(pointer::equals))
-                    .forEach(delta::addObject);
-            propagate(n, delta);
-
+            var delta = propagate(n, pts);
             if (n instanceof CSVar csVar) {
                 Var var = csVar.getVar();
                 var c = csVar.getContext();
@@ -248,12 +242,18 @@ class Solver {
      * returns the difference set of pointsToSet and pt(pointer).
      */
     private PointsToSet propagate(Pointer pointer, PointsToSet pointsToSet) {
-        if (!pointsToSet.isEmpty()) {
-            var ptn = pointer.getPointsToSet();
-            pointsToSet.forEach(ptn::addObject);
-            pointerFlowGraph.getSuccsOf(pointer).forEach(s -> workList.addEntry(s, pointsToSet));
+
+        // cal delta
+        var delta = PointsToSetFactory.make();
+        var ptn = pointer.getPointsToSet();
+        pointsToSet.objects()
+                .filter(ptr -> ptn.objects().noneMatch(ptr::equals))
+                .forEach(delta::addObject);
+        if (!delta.isEmpty()) {
+            delta.forEach(ptn::addObject);
+            pointerFlowGraph.getSuccsOf(pointer).forEach(s -> workList.addEntry(s, delta));
         }
-        return pointsToSet;
+        return delta;
     }
 
     private void processCall(CSVar recv, CSObj recvObj) {
@@ -267,11 +267,13 @@ class Solver {
             var thisVar = method.getIR().getThis();
             var csThisVar = csManager.getCSVar(ct, thisVar);
             workList.addEntry(csThisVar, PointsToSetFactory.make(recvObj));
-            processCallHelper(c, ct, csCallSite, csMethod);
+            processCallHelper(csCallSite, csMethod);
         });
     }
 
-    private void processCallHelper(Context c, Context ct, CSCallSite csCallSite, CSMethod csMethod) {
+    private void processCallHelper(CSCallSite csCallSite, CSMethod csMethod) {
+        var c = csCallSite.getContext();
+        var ct = csMethod.getContext();
         Invoke invoke = csCallSite.getCallSite();
         if (callGraph.addEdge(new Edge<>(CallGraphs.getCallKind(invoke), csCallSite, csMethod))) {
             addReachable(csMethod);
